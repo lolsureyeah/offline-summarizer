@@ -2,29 +2,31 @@
 """
 Contains helper utility functions for the application.
 """
+import re
 
-def enforce_word_limit(text: str, limit: int = 1000) -> str:
+def parse_structured_summary(raw_text: str) -> dict:
     """
-    Truncates text to a word limit, attempting to respect sentence boundaries.
+    Parses the raw text output from the LLM to extract Title, TLDR, and Summary.
     """
-    words = text.split()
-    if len(words) <= limit:
-        return text
+    data = {'title': '', 'tldr': '', 'summary': ''}
     
-    # Truncate to the word limit
-    truncated_text = " ".join(words[:limit])
+    # Use regular expressions to find the content for each section.
+    # The (?s) flag allows '.' to match newline characters.
     
-    # Find the last sentence-ending punctuation
-    # We search in reverse to find the last complete sentence.
-    last_punc_index = -1
-    for punc in ['.', '!', '?']:
-        index = truncated_text.rfind(punc)
-        if index > last_punc_index:
-            last_punc_index = index
-            
-    if last_punc_index != -1:
-        # Return text up to and including the last punctuation mark
-        return truncated_text[:last_punc_index + 1]
-    else:
-        # If no sentence end is found, add an ellipsis
-        return truncated_text + "..."
+    title_match = re.search(r"TITLE:(.*?)(TLDR:|SUMMARY:|$)", raw_text, re.DOTALL | re.IGNORECASE)
+    if title_match:
+        data['title'] = title_match.group(1).strip()
+
+    tldr_match = re.search(r"TLDR:(.*?)(SUMMARY:|$)", raw_text, re.DOTALL | re.IGNORECASE)
+    if tldr_match:
+        data['tldr'] = tldr_match.group(1).strip()
+
+    summary_match = re.search(r"SUMMARY:(.*)", raw_text, re.DOTALL | re.IGNORECASE)
+    if summary_match:
+        data['summary'] = summary_match.group(1).strip()
+
+    # Fallback if parsing fails, just return the whole text as the summary
+    if not data['title'] and not data['tldr'] and not data['summary']:
+        data['summary'] = raw_text.strip()
+
+    return data
