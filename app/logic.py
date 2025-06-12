@@ -3,32 +3,30 @@
 Orchestrates the main application logic, connecting parsing, summarization, and utilities.
 """
 import subprocess
-import json
 from .parsers import extract_text
 from .ollama_client import call_ollama_summarize, call_ollama_qna
 from .utils import parse_structured_summary
 
 def get_ollama_models():
-    """Gets the list of currently installed Ollama models."""
+    """Gets the list of currently installed Ollama models by running `ollama list`."""
     try:
-        # Use subprocess to run `ollama list` and capture the output
-        result = subprocess.run(['ollama', 'list'], capture_output=True, text=True, check=True)
+        result = subprocess.run(['ollama', 'list'], capture_output=True, text=True, check=True, encoding='utf-8')
         lines = result.stdout.strip().split('\n')
-        # Skip the header line and parse the model names
+        if len(lines) <= 1: return []
         model_names = [line.split()[0] for line in lines[1:]]
         return model_names
     except (FileNotFoundError, subprocess.CalledProcessError):
-        # Handle case where ollama command is not found or fails
         return []
 
 def process_document(params: dict) -> str:
     """
-    Main workflow router. Processes document based on the selected mode (Summarize or Q&A).
+    Main workflow router. Processes document for Summarization or Q&A based on user input.
     """
     try:
         update_status = params["update_status"]
         file_path = params["file_path"]
         model = params["model"]
+        question = params["question_str"]
         
         update_status("Step 1/3: Parsing document...")
         full_text = extract_text(file_path)
@@ -37,7 +35,14 @@ def process_document(params: dict) -> str:
         
         update_status("Step 2/3: Communicating with local LLM...")
         
-        if params["mode"] == "Summarize":
+        # --- THIS IS THE CORRECTED LOGIC ---
+        # Decide mode based on whether a question was asked.
+        if question and question.strip():
+            # --- Q&A Logic ---
+            answer = call_ollama_qna(full_text, model, question)
+            update_status("Step 3/3: Formatting answer...")
+            return f"QUESTION: {question}\n\n------------------------------------\n\nANSWER:\n{answer}"
+        else:
             # --- Summarization Logic ---
             source_word_count = len(full_text.split())
             try:
@@ -49,7 +54,7 @@ def process_document(params: dict) -> str:
                 target_word_count = int(source_word_count * 0.2)
             
             keywords_str = params["keywords_str"]
-            keywords = [keyword.strip() for keyword in keywords_str.split(',')] if keywords_str else []
+            keywords = [keyword.strip() for keyword in keywords_str.split(',') if keyword.strip()] if keywords_str else []
             
             raw_output = call_ollama_summarize(full_text, model, target_word_count, keywords)
             
@@ -62,16 +67,6 @@ def process_document(params: dict) -> str:
                 f"SUMMARY:\n{parsed_data.get('summary', 'N/A')}"
             )
             return final_formatted_output
-
-        elif params["mode"] == "Ask a Question":
-            # --- Q&A Logic ---
-            question = params["question_str"]
-            if not question:
-                raise ValueError("Please enter a question to ask about the document.")
-            
-            answer = call_ollama_qna(full_text, model, question)
-            update_status("Step 3/3: Formatting answer...")
-            return f"QUESTION: {question}\n\n------------------------------------\n\nANSWER:\n{answer}"
         
     except Exception as e:
         raise e
